@@ -1,0 +1,6 @@
+{
+  "name": "Office Request Desk",
+  "description": "Intelligent office request intake, Gemini classification, extraction, business rules evaluation, and Google Sheets integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
