@@ -34,4 +34,9 @@ test('IT: blocked_from_work false -> Normal regardless of severity', () => {
   assert.equal(T({ work_impact: 'No impact', severity: 'High' }), S.NORMAL);
 });
 
+test('IT: AI could not tell if blocked -> manual review, never Normal', () => {
+  assert.equal(T({ severity: 'High' }), S.REVIEW);
+  assert.equal(T({ blocked_from_work: null, work_impact: null }), S.REVIEW);
+});
+
 test('OTHER -> Check by hand', () => assert.equal(evaluate('OTHER', {}).status, S.HAND));

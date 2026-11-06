@@ -64,7 +64,8 @@ export function evaluateIT(f) {
   // IT_SUPPORT rule: status depends ONLY on blocked_from_work (true -> "Urgent", false -> "Normal").
   // Severity is recorded in the sheet but must never affect the status.
   // If the AI could not tell whether the person is blocked, a person decides. Never guess "Normal".
-  if (typeof f.blocked_from_work !== 'boolean' && f.work_impact !== 'Cannot work') {
+  const knownImpact = f.work_impact === 'Cannot work' || f.work_impact === 'No impact';
+  if (typeof f.blocked_from_work !== 'boolean' && !knownImpact) {
     return { status: STATUS.REVIEW, rule: 'IT: could not tell if employee is blocked -> manual review' };
   }
   const isBlocked = f.blocked_from_work === true || f.work_impact === 'Cannot work';

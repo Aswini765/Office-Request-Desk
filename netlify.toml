@@ -1,0 +1,10 @@
+# Netlify deployment for the Office Request Desk.
+# The page is plain HTML in /public; all /api/* calls go to netlify/functions/api.mjs.
+[build]
+  command = "echo 'No build step needed'"
+  publish = "public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+  included_files = ["src/**"]

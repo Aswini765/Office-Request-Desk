@@ -4,9 +4,9 @@ const TYPES = ['LEAVE', 'EXPENSE', 'IT_SUPPORT', 'OTHER'];
 
 export async function callGemini(prompt, {
   fetchImpl = fetch,
-  maxAttempts = 3,
+  maxAttempts = Number(process.env.GEMINI_MAX_ATTEMPTS) || 3,
   initialDelayMs = 1000,
-  timeoutMs = 20000,
+  timeoutMs = Number(process.env.GEMINI_TIMEOUT_MS) || 20000,
   sleepImpl = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 } = {}) {
   const key = process.env.GEMINI_API_KEY;
