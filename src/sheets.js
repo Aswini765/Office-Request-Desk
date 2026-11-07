@@ -174,3 +174,14 @@ export async function runSheetsDiagnostic({ url = process.env.APPS_SCRIPT_URL ||
     testedAt: timestamp,
   };
 }
+
+// Read the public holidays from the "Holidays" tab (Apps Script doGet?action=holidays).
+// Returns ['YYYY-MM-DD', ...]. Code uses them to count working days; Gemini never sees them.
+export async function fetchHolidays({ url = process.env.APPS_SCRIPT_URL || DEFAULT_APPS_SCRIPT_URL, fetchImpl = fetch } = {}) {
+  if (!url) throw new Error('APPS_SCRIPT_URL is not configured');
+  const res = await fetchImpl(url + (url.includes('?') ? '&' : '?') + 'action=holidays', { signal: AbortSignal.timeout(8000) });
+  if (!res.ok) throw new Error(`Holidays lookup returned HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data || data.ok !== true || !Array.isArray(data.holidays)) throw new Error('Holidays lookup returned an unexpected response');
+  return data.holidays.filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d));
+}

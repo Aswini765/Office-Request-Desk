@@ -1,10 +1,10 @@
 // WORKFLOW CONTROLLER - runs the fixed pipeline. Not a chatbot.
 import { classify, extract } from './gemini.js';
 import { evaluate, needsHuman } from './rules.js';
-import { buildRow, saveToSheets, TAB_FOR } from './sheets.js';
+import { buildRow, saveToSheets, fetchHolidays, TAB_FOR } from './sheets.js';
 import { validateInput } from './validate.js';
 
-export const defaultDeps = () => ({ classify, extract, save: saveToSheets, now: () => new Date() });
+export const defaultDeps = () => ({ classify, extract, save: saveToSheets, holidays: fetchHolidays, now: () => new Date() });
 const ist = (d) => d.toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' });
 const KEYS = {
   LEAVE: ['start_date', 'end_date', 'leave_type', 'reason'],
@@ -88,8 +88,13 @@ export async function processRequest(input, deps = defaultDeps(), emit = () => {
   }
   rec.missing = Object.entries(rec.extracted).filter(([, x]) => x === null).map(([k]) => k);
 
-  // 3) CODE decides the status.
-  rec.rule = evaluate(rec.category, rec.extracted);
+  // 3) CODE decides the status. For leave, code first looks up the Holidays tab.
+  let holidays = [];
+  if (rec.category === 'LEAVE' && deps.holidays) {
+    try { holidays = await deps.holidays(); }
+    catch (e) { rec.aiNotes.push(`Holiday lookup failed (counted without holidays): ${e.message}`); }
+  }
+  rec.rule = evaluate(rec.category, rec.extracted, { holidays });
   rec.needsHuman = needsHuman(rec.rule.status);
   emit({ stage: 'rules', actor: 'Code', state: 'done', detail: `${rec.rule.status} (${rec.rule.rule})` });
 

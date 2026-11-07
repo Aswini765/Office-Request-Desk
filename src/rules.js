@@ -32,22 +32,40 @@ export function parseISODate(s) {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d ? dt : null;
 }
 
-export function countWorkingDays(start, end) {
+// Holidays come from the "Holidays" tab of the Sheet as 'YYYY-MM-DD' strings.
+const isoOf = (t) => new Date(t).toISOString().slice(0, 10);
+
+export function countWorkingDays(start, end, holidays = []) {
+  const skip = new Set(holidays);
   let n = 0;
   for (let t = start.getTime(); t <= end.getTime(); t += 86400000) {
     const day = new Date(t).getUTCDay();
-    if (day !== 0 && day !== 6) n++; // skip Sunday(0) and Saturday(6)
+    if (day === 0 || day === 6) continue; // skip Sunday(0) and Saturday(6)
+    if (skip.has(isoOf(t))) continue;      // skip public holidays from the Holidays tab
+    n++;
   }
   return n;
 }
 
-export function evaluateLeave(f) {
+// Weekday holidays that fall inside the leave (used to explain the rule).
+export function holidaysInRange(start, end, holidays = []) {
+  const skip = new Set(holidays), hit = [];
+  for (let t = start.getTime(); t <= end.getTime(); t += 86400000) {
+    const day = new Date(t).getUTCDay();
+    if (day !== 0 && day !== 6 && skip.has(isoOf(t))) hit.push(isoOf(t));
+  }
+  return hit;
+}
+
+export function evaluateLeave(f, holidays = []) {
   const s = parseISODate(f.start_date), e = parseISODate(f.end_date);
   if (!s || !e) return { status: STATUS.REVIEW, rule: 'Leave: start or end date missing/invalid', workingDays: null };
   if (e < s) return { status: STATUS.REVIEW, rule: 'Leave: end date is before start date', workingDays: null };
-  const wd = countWorkingDays(s, e);
-  if (wd <= 3) return { status: STATUS.AUTO, rule: `Leave: ${wd} working day(s) <= 3 -> auto-approve`, workingDays: wd };
-  return { status: STATUS.MANAGER, rule: `Leave: ${wd} working days > 3 -> manager approval`, workingDays: wd };
+  const wd = countWorkingDays(s, e, holidays);
+  const hit = holidaysInRange(s, e, holidays);
+  const note = hit.length ? ` (${hit.length} holiday skipped: ${hit.join(', ')})` : '';
+  if (wd <= 3) return { status: STATUS.AUTO, rule: `Leave: ${wd} working day(s)${note} <= 3 -> auto-approve`, workingDays: wd, holidaysSkipped: hit };
+  return { status: STATUS.MANAGER, rule: `Leave: ${wd} working days${note} > 3 -> manager approval`, workingDays: wd, holidaysSkipped: hit };
 }
 
 export function evaluateExpense(f) {
@@ -75,9 +93,9 @@ export function evaluateIT(f) {
   return { status: STATUS.NORMAL, rule: 'IT: not blocked from work -> Normal' };
 }
 
-export function evaluate(type, fields) {
+export function evaluate(type, fields, ctx = {}) {
   switch (type) {
-    case 'LEAVE': return evaluateLeave(fields);
+    case 'LEAVE': return evaluateLeave(fields, ctx.holidays || []);
     case 'EXPENSE': return evaluateExpense(fields);
     case 'IT_SUPPORT': return evaluateIT(fields);
     case 'OTHER': return { status: STATUS.HAND, rule: 'Other: all OTHER requests are checked by hand' };

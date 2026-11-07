@@ -39,4 +39,14 @@ test('IT: AI could not tell if blocked -> manual review, never Normal', () => {
   assert.equal(T({ blocked_from_work: null, work_impact: null }), S.REVIEW);
 });
 
+test('Leave: a holiday from the Holidays tab is not a working day', () => {
+  const f = { start_date: '2026-12-23', end_date: '2026-12-28' }; // Wed..Mon = 4 weekdays
+  assert.equal(evaluate('LEAVE', f).status, S.MANAGER);                                   // no holidays: 4 days
+  const r = evaluate('LEAVE', f, { holidays: ['2026-12-25'] });                          // Christmas skipped: 3 days
+  assert.equal(r.status, S.AUTO);
+  assert.equal(r.workingDays, 3);
+  assert.deepEqual(r.holidaysSkipped, ['2026-12-25']);
+  assert.equal(evaluate('LEAVE', f, { holidays: ['2026-12-26'] }).workingDays, 4);       // a Saturday holiday changes nothing
+});
+
 test('OTHER -> Check by hand', () => assert.equal(evaluate('OTHER', {}).status, S.HAND));
