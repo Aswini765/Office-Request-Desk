@@ -64,6 +64,7 @@ export function evaluateLeave(f, holidays = []) {
   const wd = countWorkingDays(s, e, holidays);
   const hit = holidaysInRange(s, e, holidays);
   const note = hit.length ? ` (${hit.length} holiday skipped: ${hit.join(', ')})` : '';
+  if (wd === 0) return { status: STATUS.REVIEW, rule: `Leave: 0 working days${note} -> manual review (dates fall only on weekends/holidays; check the dates)`, workingDays: 0, holidaysSkipped: hit };
   if (wd <= 3) return { status: STATUS.AUTO, rule: `Leave: ${wd} working day(s)${note} <= 3 -> auto-approve`, workingDays: wd, holidaysSkipped: hit };
   return { status: STATUS.MANAGER, rule: `Leave: ${wd} working days${note} > 3 -> manager approval`, workingDays: wd, holidaysSkipped: hit };
 }

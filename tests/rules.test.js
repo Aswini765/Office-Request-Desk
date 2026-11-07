@@ -49,4 +49,11 @@ test('Leave: a holiday from the Holidays tab is not a working day', () => {
   assert.equal(evaluate('LEAVE', f, { holidays: ['2026-12-26'] }).workingDays, 4);       // a Saturday holiday changes nothing
 });
 
+test('Leave: 0 working days (only holidays/weekends) -> manual review, never auto-approve', () => {
+  const r = evaluate('LEAVE', { start_date: '2027-01-26', end_date: '2027-01-26' }, { holidays: ['2027-01-26'] });
+  assert.equal(r.status, S.REVIEW);
+  assert.equal(r.workingDays, 0);
+  assert.equal(evaluate('LEAVE', { start_date: '2026-11-28', end_date: '2026-11-29' }).status, S.REVIEW); // Sat-Sun only
+});
+
 test('OTHER -> Check by hand', () => assert.equal(evaluate('OTHER', {}).status, S.HAND));
