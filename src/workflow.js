@@ -3,6 +3,7 @@ import { classify, extract } from './gemini.js';
 import { evaluate, needsHuman } from './rules.js';
 import { buildRow, saveToSheets, fetchHolidays, TAB_FOR } from './sheets.js';
 import { validateInput } from './validate.js';
+import { buildEmail } from './email.js';
 
 export const defaultDeps = () => ({ classify, extract, save: saveToSheets, holidays: fetchHolidays, now: () => new Date() });
 const ist = (d) => d.toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' });
@@ -53,6 +54,7 @@ export async function processRequest(input, deps = defaultDeps(), emit = () => {
       rule: 'AI classification is temporarily unavailable. Please retry or send this request for manual review.',
     };
     rec.needsHuman = true;
+    rec.email = buildEmail(rec);
     emit({ stage: 'rules', actor: 'Code', state: 'done', detail: 'CLASSIFICATION_FAILED: manual review required' });
     rec.tab = null;
     rec.row = null;
@@ -62,6 +64,7 @@ export async function processRequest(input, deps = defaultDeps(), emit = () => {
       maybeDuplicate: false,
       attempts: 0,
       skipped: true,
+      emailSent: false,
     };
     emit({ stage: 'save', actor: 'Code', state: 'error', detail: 'Skipped: cannot save unclassified request to Google Sheets' });
     return rec;
@@ -98,10 +101,13 @@ export async function processRequest(input, deps = defaultDeps(), emit = () => {
   rec.needsHuman = needsHuman(rec.rule.status);
   emit({ stage: 'rules', actor: 'Code', state: 'done', detail: `${rec.rule.status} (${rec.rule.rule})` });
 
-  // 4) CODE saves to the right tab.
+  // 4) Build email IN CODE after status is decided
+  rec.email = buildEmail(rec);
+
+  // 5) CODE saves to the right tab and sends email payload to Apps Script.
   rec.tab = TAB_FOR[rec.category];
   rec.row = buildRow(rec);
-  rec.save = { ok: false, error: null, maybeDuplicate: false, attempts: 0 };
+  rec.save = { ok: false, error: null, maybeDuplicate: false, attempts: 0, emailSent: false };
   await saveStep(rec, deps, emit);
   return rec;
 }
@@ -109,12 +115,13 @@ export async function processRequest(input, deps = defaultDeps(), emit = () => {
 async function saveStep(rec, deps, emit) {
   emit({ stage: 'save', actor: 'Code', state: 'running' });
   rec.save.attempts++;
-  const r = await deps.save(rec.tab, rec.row);
+  const r = await deps.save(rec.tab, rec.row, { email: rec.email });
   rec.save = {
     ...rec.save,
     ok: r.ok,
     tab: r.tab || rec.tab,
     row: r.row ?? null,
+    emailSent: Boolean(r?.emailSent),
     error: r.error,
     maybeDuplicate: r.maybeDuplicate,
   };
@@ -123,7 +130,7 @@ async function saveStep(rec, deps, emit) {
     actor: 'Code',
     state: r.ok ? 'done' : 'error',
     detail: r.ok
-      ? `Saved to "${r.tab || rec.tab}" tab at row ${r.row} (Apps Script confirmed ok:true)`
+      ? `Saved to "${r.tab || rec.tab}" tab at row ${r.row} (Apps Script confirmed ok:true)${r.emailSent ? ' • Email sent to ' + (rec.email?.team || 'Team') : ''}`
       : r.error,
   });
 }

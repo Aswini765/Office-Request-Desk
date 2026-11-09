@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { processRequest, retrySave } from '../src/workflow.js';
 import { buildRow, saveToSheets, objectToRow, runSheetsDiagnostic, EXPECTED_COLUMNS } from '../src/sheets.js';
 import { validateClassification, normalizeExtraction, callGemini } from '../src/gemini.js';
+import { buildEmail, EMAIL_TO, NEXT_STEPS, TEAM_FOR } from '../src/email.js';
 
 const input = { name: 'Asha Rao', email: 'asha@example.com', description: 'test request' };
 const mk = (over = {}) => {
@@ -339,3 +340,161 @@ test('runSheetsDiagnostic returns failure when endpoint fails', async () => {
   assert.equal(diag.ok, false);
   assert.match(diag.error, /Database locked/);
 });
+
+// EMAIL ACTION TESTS
+test('buildEmail generates correct recipient, subject, and body for Expense example', () => {
+  const rec = {
+    employee: 'Priya',
+    email: 'priya@example.com',
+    description: 'Taxi from airport to client office ₹5,000',
+    category: 'EXPENSE',
+    extracted: {
+      amount: 5000,
+      category: 'Taxi',
+      expense_date: '2026-11-08',
+      receipt_available: true,
+      business_purpose: 'Client meeting',
+    },
+    rule: {
+      status: 'Needs finance approval',
+      rule: 'Expense: amount > INR 2,000 with receipt -> finance approval',
+    },
+  };
+
+  const email = buildEmail(rec);
+  assert.equal(email.to, 'aswini.27196@gmail.com');
+  assert.equal(email.team, 'Finance');
+  assert.equal(email.subject, '[Expense] Finance review – Taxi ₹5,000 – Priya');
+  assert.equal(email.nextStep, 'Waiting for finance review');
+
+  // Verify body contains each required section
+  assert.match(email.body, /^Request: Taxi from airport to client office ₹5,000/m);
+  assert.match(email.body, /^From: Priya \(priya@example\.com\)/m);
+  assert.match(email.body, /^Facts read by AI:\namount: 5000\ncategory: Taxi\nexpense_date: 2026-11-08\nreceipt_available: true\nbusiness_purpose: Client meeting/m);
+  assert.match(email.body, /^Status: Needs finance approval/m);
+  assert.match(email.body, /^Rule applied: Expense: amount > INR 2,000 with receipt -> finance approval/m);
+  assert.match(email.body, /^Next step: Waiting for finance review/m);
+});
+
+test('buildEmail formats all four paths correctly', () => {
+  // 1. Leave
+  const leaveRec = {
+    employee: 'Asha Rao',
+    email: 'asha@example.com',
+    description: 'Casual leave for 3 days',
+    category: 'LEAVE',
+    extracted: { start_date: '2026-11-09', end_date: '2026-11-11', leave_type: 'Casual Leave', reason: 'Family' },
+    rule: { status: 'Auto-approved', rule: 'Leave: 3 working day(s) <= 3 -> auto-approve', workingDays: 3 },
+  };
+  const leaveEmail = buildEmail(leaveRec);
+  assert.equal(leaveEmail.to, EMAIL_TO);
+  assert.equal(leaveEmail.team, 'HR');
+  assert.equal(leaveEmail.subject, '[Leave] HR auto-approved – Casual Leave 3 days – Asha Rao');
+  assert.equal(leaveEmail.nextStep, 'No action needed, approved automatically');
+
+  // 2. IT Support (Urgent)
+  const itRec = {
+    employee: 'Rahul',
+    email: 'rahul@example.com',
+    description: 'Laptop screen is completely black and cannot work',
+    category: 'IT_SUPPORT',
+    extracted: { issue_category: 'Hardware', severity: 'Critical', device_or_system: 'Laptop', work_impact: 'Cannot work', issue_description: 'screen broken', blocked_from_work: true },
+    rule: { status: 'Urgent', rule: 'IT: blocked from work -> Urgent' },
+  };
+  const itEmail = buildEmail(itRec);
+  assert.equal(itEmail.to, EMAIL_TO);
+  assert.equal(itEmail.team, 'IT');
+  assert.equal(itEmail.subject, '[IT Support] IT urgent – Laptop: screen broken – Rahul');
+  assert.equal(itEmail.nextStep, 'IT to respond urgently, employee cannot work');
+
+  // 3. Other
+  const otherRec = {
+    employee: 'Sarah',
+    email: 'sarah@example.com',
+    description: 'Ergonomic chair request for lumbar support',
+    category: 'OTHER',
+    extracted: {},
+    classification: { classification_reason: 'Ergonomic chair evaluation' },
+    rule: { status: 'Check by hand', rule: 'Other: all OTHER requests are checked by hand' },
+  };
+  const otherEmail = buildEmail(otherRec);
+  assert.equal(otherEmail.to, EMAIL_TO);
+  assert.equal(otherEmail.team, 'Admin');
+  assert.equal(otherEmail.subject, '[Other] Admin review – Ergonomic chair evaluation – Sarah');
+  assert.equal(otherEmail.nextStep, 'A person will check this request');
+});
+
+test('NEXT_STEPS has expected action text for all standard statuses', () => {
+  assert.equal(NEXT_STEPS['Auto-approved'], 'No action needed, approved automatically');
+  assert.equal(NEXT_STEPS['Needs manager approval'], 'Waiting for manager approval');
+  assert.equal(NEXT_STEPS['Needs finance approval'], 'Waiting for finance review');
+  assert.equal(NEXT_STEPS['Finance review'], 'Waiting for finance review');
+  assert.equal(NEXT_STEPS['Needs manual verification'], 'Waiting for the employee to send the receipt or amount');
+  assert.equal(NEXT_STEPS['needs receipt/amount'], 'Waiting for the employee to send the receipt or amount');
+  assert.equal(NEXT_STEPS['Urgent'], 'IT to respond urgently, employee cannot work');
+  assert.equal(NEXT_STEPS['Normal'], 'IT to respond in the normal queue');
+  assert.equal(NEXT_STEPS['Check by hand'], 'A person will check this request');
+  assert.equal(NEXT_STEPS['Needs manual review'], 'A person will check this request');
+  assert.equal(NEXT_STEPS['CLASSIFICATION_FAILED'], 'A person will check this request');
+});
+
+test('saveToSheets transmits email object in POST payload and captures emailSent response', async () => {
+  let capturedPayload;
+  const fakeFetch = async (url, opts) => {
+    capturedPayload = JSON.parse(opts.body);
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ ok: true, tab: capturedPayload.tab, row: 8, emailSent: true }),
+    };
+  };
+
+  const emailObj = {
+    to: 'aswini.27196@gmail.com',
+    subject: '[Expense] Finance review – Taxi ₹5,000 – Priya',
+    body: 'Request: Taxi\nFrom: Priya',
+  };
+
+  const validRow = new Array(EXPECTED_COLUMNS['Expense']).fill('x');
+  const res = await saveToSheets('Expense', validRow, { email: emailObj, url: 'https://example.com/exec', fetchImpl: fakeFetch });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.row, 8);
+  assert.equal(res.emailSent, true);
+  assert.deepEqual(capturedPayload.email, emailObj);
+});
+
+test('saveToSheets still succeeds if emailSent is false or omitted by Apps Script', async () => {
+  const fakeFetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({ ok: true, tab: 'Leave', row: 9, emailSent: false }),
+  });
+
+  const validRow = new Array(EXPECTED_COLUMNS['Leave']).fill('x');
+  const res = await saveToSheets('Leave', validRow, { email: { to: 'test@example.com' }, url: 'https://example.com/exec', fetchImpl: fakeFetch });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.row, 9);
+  assert.equal(res.emailSent, false);
+});
+
+test('processRequest creates email object and records emailSent in save result', async () => {
+  let passedOpts;
+  const d = mk({
+    save: async (tab, row, opts) => {
+      passedOpts = opts;
+      return { ok: true, tab, row: 10, emailSent: true };
+    },
+  });
+
+  const r = await processRequest(input, d);
+  assert.equal(r.category, 'LEAVE');
+  assert.ok(r.email);
+  assert.equal(r.email.to, 'aswini.27196@gmail.com');
+  assert.equal(r.email.team, 'HR');
+  assert.ok(passedOpts?.email);
+  assert.equal(passedOpts.email.to, 'aswini.27196@gmail.com');
+  assert.equal(r.save.emailSent, true);
+});
+

@@ -47,7 +47,7 @@ export function buildRow(r) {
   return [...head, ...body, ...tail].map(safe);
 }
 
-export async function saveToSheets(tab, rowInput, { url = process.env.APPS_SCRIPT_URL || DEFAULT_APPS_SCRIPT_URL, fetchImpl = fetch } = {}) {
+export async function saveToSheets(tab, rowInput, { email, url = process.env.APPS_SCRIPT_URL || DEFAULT_APPS_SCRIPT_URL, fetchImpl = fetch } = {}) {
   if (!url) return { ok: false, error: 'APPS_SCRIPT_URL is not configured', maybeDuplicate: false };
 
   // Validate tab
@@ -74,6 +74,11 @@ export async function saveToSheets(tab, rowInput, { url = process.env.APPS_SCRIP
     };
   }
 
+  const payload = { tab, row };
+  if (email && typeof email === 'object') {
+    payload.email = email;
+  }
+
   let res;
   try {
     res = await fetchImpl(url, {
@@ -81,7 +86,7 @@ export async function saveToSheets(tab, rowInput, { url = process.env.APPS_SCRIP
       redirect: 'follow',
       signal: AbortSignal.timeout(20000),
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ tab, row }),
+      body: JSON.stringify(payload),
     });
   } catch (e) {
     // The request may or may not have reached Google, so a retry could duplicate the row.
@@ -131,6 +136,7 @@ export async function saveToSheets(tab, rowInput, { url = process.env.APPS_SCRIP
     ok: true,
     tab: data.tab || tab,
     row: data.row,
+    emailSent: Boolean(data?.emailSent),
     error: null,
     maybeDuplicate: false,
   };

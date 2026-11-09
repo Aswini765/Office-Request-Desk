@@ -49,6 +49,7 @@ const $=id=>document.getElementById(id);
 const STAGES=[['receive','Receiving request','Code'],['classify','Classifying request using AI','AI'],['extract','Extracting information','AI'],['rules','Applying business rules','Code'],['save','Saving to Google Sheets','Code']];
 const el=(t,a={},...k)=>{const e=document.createElement(t);for(const[x,v]of Object.entries(a))x==='class'?e.className=v:e.setAttribute(x,v);for(const c of k.flat())e.append(c instanceof Node?c:document.createTextNode(c));return e};
 const CAT={LEAVE:'Leave',EXPENSE:'Expense',IT_SUPPORT:'IT Support',OTHER:'Other'};
+const TEAM={LEAVE:'HR',EXPENSE:'Finance',IT_SUPPORT:'IT',OTHER:'Admin'};
 
 async function loadStats(){try{const s=await (await fetch('/api/stats')).json();
  const items=[['Total requests',s.total],['Leave',s.leave],['Expense',s.expense],['IT Support',s.it],['Other',s.other],['Needs human review',s.humanReview]];
@@ -69,6 +70,7 @@ async function loadStats(){try{const s=await (await fetch('/api/stats')).json();
   for(const[k,v]of Object.entries(r.extracted||{}))add(k.replace(/_/g,' '),v);
   if(r.category==='LEAVE')add('working days',r.rule.workingDays);
   add('Business rule applied',r.rule.rule);
+  if(r.email){add('Email to',r.email.to);add('Email subject',r.email.subject);add('Next step',r.email.nextStep);}
   const box=el('div',{class:'results'},el('div',{class:'status'},r.rule.status),dl);
   if(r.rule.status==='CLASSIFICATION_FAILED')box.append(el('div',{class:'banner bad'},'AI classification is temporarily unavailable. Please retry or send this request for manual review.'));
   else if(r.aiNotes&&r.aiNotes.length)box.append(el('div',{class:'banner bad'},'AI problem: '+r.aiNotes.join('; ')+'. Not approved automatically.'));
@@ -78,6 +80,13 @@ async function loadStats(){try{const s=await (await fetch('/api/stats')).json();
   else{const b=el('div',{class:'banner bad'},'Not saved to Google Sheets: '+(r.save.error||'Save failed')+'. Your request is kept. ');
    if(r.save.maybeDuplicate)b.append(el('div',{},'The connection failed mid-request, so a row may already exist. Check the sheet before retrying.'));
    const rb=el('button',{type:'button'},'Retry save');rb.onclick=async()=>{rb.disabled=true;const res=await fetch(`/api/requests/${r.id}/retry`,{method:'POST'});const j=await res.json();if(j.id)showResult(j);else{alert(j.error);rb.disabled=false}loadStats();loadHistory()};b.append(el('div',{},rb));box.append(b)}
+
+  const team = (r.email?.team) || TEAM[r.category] || 'Team';
+  if(r.save?.emailSent){
+    box.append(el('div',{class:'banner ok',id:'email-status'},`Email sent to ${team}`));
+  }else{
+    box.append(el('div',{class:'banner bad',id:'email-status'},'Email not sent'));
+  }
   right.append(box);
  }
 
